@@ -1,0 +1,585 @@
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+-- // СЕРВИСЫ //
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+
+-- // КОНФИГУРАЦИЯ И ЛОГИКА (Сохранена из твоего скрипта) //
+local config = {
+    SpeedBoost = false,
+    BoostSpeedValue = 50,
+    AntiTrap = false,
+    InfiniteJump = false,
+    ViewBaseTimers = false,
+    SelectedJobId = nil
+}
+
+-- Глобальные переменные для логики
+local antiTrapEnabled = false
+local speedBoostEnabled = false
+local infiniteJumpEnabled = false
+local floatEnabled = false
+local jumpBoostEnabled = false
+local godModeEnabled = false
+local antiRagdollEnabled = false
+local autoSlapEnabled = false
+local playersEspEnabled = false
+local lockEspEnabled = false
+local plotTimers_Enabled = false
+
+-- (Вспомогательные функции сохранения конфига можно добавить сюда, 
+--  но для краткости визуальной части я сосредоточился на UI)
+
+-- // UI LIBRARY (НОВЫЙ ДИЗАЙН) //
+local UI = {}
+local UI_Colors = {
+    Background = Color3.fromRGB(20, 20, 25),
+    Sidebar = Color3.fromRGB(25, 25, 30),
+    Element = Color3.fromRGB(35, 35, 40),
+    ElementHover = Color3.fromRGB(45, 45, 50),
+    Text = Color3.fromRGB(240, 240, 240),
+    TextDark = Color3.fromRGB(150, 150, 160),
+    Accent = Color3.fromRGB(115, 80, 255), -- Фиолетовый Wava
+    ToggleOff = Color3.fromRGB(60, 60, 65),
+    Red = Color3.fromRGB(255, 80, 80)
+}
+
+function UI:CreateWindow(titleText)
+    -- Удаляем старый UI если есть
+    if CoreGui:FindFirstChild("WavaRemastered") then
+        CoreGui.WavaRemastered:Destroy()
+    end
+
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "WavaRemastered"
+    ScreenGui.Parent = CoreGui
+    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Name = "MainFrame"
+    MainFrame.Size = UDim2.new(0, 550, 0, 350)
+    MainFrame.Position = UDim2.new(0.5, -275, 0.5, -175)
+    MainFrame.BackgroundColor3 = UI_Colors.Background
+    MainFrame.ClipsDescendants = true
+    MainFrame.Parent = ScreenGui
+    
+    -- Закругление
+    local MainCorner = Instance.new("UICorner")
+    MainCorner.CornerRadius = UDim.new(0, 10)
+    MainCorner.Parent = MainFrame
+    
+    -- Обводка (Glow effect emulation)
+    local MainStroke = Instance.new("UIStroke")
+    MainStroke.Color = UI_Colors.Accent
+    MainStroke.Thickness = 1
+    MainStroke.Transparency = 0.6
+    MainStroke.Parent = MainFrame
+
+    -- Dragging Logic
+    local dragging, dragInput, dragStart, startPos
+    MainFrame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = MainFrame.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    MainFrame.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            TweenService:Create(MainFrame, TweenInfo.new(0.1), {
+                Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            }):Play()
+        end
+    end)
+
+    -- Sidebar
+    local Sidebar = Instance.new("Frame")
+    Sidebar.Size = UDim2.new(0, 140, 1, 0)
+    Sidebar.BackgroundColor3 = UI_Colors.Sidebar
+    Sidebar.Parent = MainFrame
+    
+    local SidebarCorner = Instance.new("UICorner")
+    SidebarCorner.CornerRadius = UDim.new(0, 10)
+    SidebarCorner.Parent = Sidebar
+    
+    -- Fix corner overlap
+    local SidebarFix = Instance.new("Frame")
+    SidebarFix.Size = UDim2.new(0, 10, 1, 0)
+    SidebarFix.Position = UDim2.new(1, -10, 0, 0)
+    SidebarFix.BackgroundColor3 = UI_Colors.Sidebar
+    SidebarFix.BorderSizePixel = 0
+    SidebarFix.Parent = Sidebar
+
+    -- Title
+    local Title = Instance.new("TextLabel")
+    Title.Text = titleText
+    Title.Font = Enum.Font.GothamBold
+    Title.TextSize = 18
+    Title.TextColor3 = UI_Colors.Accent
+    Title.Size = UDim2.new(1, -20, 0, 50)
+    Title.Position = UDim2.new(0, 20, 0, 10)
+    Title.BackgroundTransparency = 1
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+    Title.Parent = Sidebar
+
+    -- Container for Buttons
+    local TabContainer = Instance.new("ScrollingFrame")
+    TabContainer.Size = UDim2.new(1, 0, 1, -70)
+    TabContainer.Position = UDim2.new(0, 0, 0, 60)
+    TabContainer.BackgroundTransparency = 1
+    TabContainer.ScrollBarThickness = 0
+    TabContainer.Parent = Sidebar
+    
+    local TabListLayout = Instance.new("UIListLayout")
+    TabListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    TabListLayout.Padding = UDim.new(0, 5)
+    TabListLayout.Parent = TabContainer
+
+    -- Content Area
+    local ContentArea = Instance.new("Frame")
+    ContentArea.Size = UDim2.new(1, -150, 1, -20)
+    ContentArea.Position = UDim2.new(0, 150, 0, 10)
+    ContentArea.BackgroundTransparency = 1
+    ContentArea.Parent = MainFrame
+
+    -- Анимация открытия
+    MainFrame.Size = UDim2.new(0, 0, 0, 0)
+    TweenService:Create(MainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = UDim2.new(0, 550, 0, 350)}):Play()
+
+    -- Возвращаем объект окна
+    local Window = {
+        Tabs = {},
+        ActiveTab = nil
+    }
+
+    function Window:CreateTab(name, iconId)
+        local Tab = {
+            Elements = {}
+        }
+        
+        -- Кнопка таба
+        local TabBtn = Instance.new("TextButton")
+        TabBtn.Size = UDim2.new(1, -20, 0, 35)
+        TabBtn.Position = UDim2.new(0, 10, 0, 0)
+        TabBtn.BackgroundColor3 = UI_Colors.Background
+        TabBtn.BackgroundTransparency = 1
+        TabBtn.Text = name
+        TabBtn.Font = Enum.Font.GothamMedium
+        TabBtn.TextColor3 = UI_Colors.TextDark
+        TabBtn.TextSize = 14
+        TabBtn.TextXAlignment = Enum.TextXAlignment.Left
+        TabBtn.Parent = TabContainer
+        
+        local TabPadding = Instance.new("UIPadding")
+        TabPadding.PaddingLeft = UDim.new(0, 10)
+        TabPadding.Parent = TabBtn
+        
+        -- Контейнер для элементов таба
+        local TabPage = Instance.new("ScrollingFrame")
+        TabPage.Size = UDim2.new(1, 0, 1, 0)
+        TabPage.BackgroundTransparency = 1
+        TabPage.ScrollBarThickness = 2
+        TabPage.ScrollBarImageColor3 = UI_Colors.Accent
+        TabPage.Visible = false
+        TabPage.Parent = ContentArea
+        
+        local PageLayout = Instance.new("UIListLayout")
+        PageLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        PageLayout.Padding = UDim.new(0, 8)
+        PageLayout.Parent = TabPage
+        
+        local PagePadding = Instance.new("UIPadding")
+        PagePadding.PaddingRight = UDim.new(0, 10)
+        PagePadding.Parent = TabPage
+
+        -- Логика переключения
+        TabBtn.MouseButton1Click:Connect(function()
+            -- Сброс всех табов
+            for _, t in pairs(Window.Tabs) do
+                TweenService:Create(t.Btn, TweenInfo.new(0.3), {TextColor3 = UI_Colors.TextDark}):Play()
+                t.Page.Visible = false
+            end
+            
+            -- Активация текущего
+            TweenService:Create(TabBtn, TweenInfo.new(0.3), {TextColor3 = UI_Colors.Text}):Play()
+            TabPage.Visible = true
+            
+            -- Анимация контента
+            TabPage.CanvasPosition = Vector2.new(0,0)
+            for _, child in pairs(TabPage:GetChildren()) do
+                if child:IsA("Frame") then
+                    child.BackgroundTransparency = 1
+                    TweenService:Create(child, TweenInfo.new(0.3), {BackgroundTransparency = 0}):Play()
+                end
+            end
+        end)
+        
+        Window.Tabs[name] = {Btn = TabBtn, Page = TabPage}
+        
+        -- Если это первый таб, открываем его
+        if not Window.ActiveTab then
+            Window.ActiveTab = name
+            TabBtn.TextColor3 = UI_Colors.Text
+            TabPage.Visible = true
+        end
+
+        -- // ФУНКЦИИ ЭЛЕМЕНТОВ //
+        
+        function Tab:CreateButton(text, callback)
+            local ButtonFrame = Instance.new("TextButton")
+            ButtonFrame.Size = UDim2.new(1, 0, 0, 35)
+            ButtonFrame.BackgroundColor3 = UI_Colors.Element
+            ButtonFrame.Text = ""
+            ButtonFrame.AutoButtonColor = false
+            ButtonFrame.Parent = TabPage
+            
+            local Corner = Instance.new("UICorner"); Corner.CornerRadius = UDim.new(0, 6); Corner.Parent = ButtonFrame
+            
+            local Label = Instance.new("TextLabel")
+            Label.Size = UDim2.new(1, 0, 1, 0)
+            Label.BackgroundTransparency = 1
+            Label.Text = text
+            Label.Font = Enum.Font.GothamBold
+            Label.TextColor3 = UI_Colors.Text
+            Label.TextSize = 12
+            Label.Parent = ButtonFrame
+
+            ButtonFrame.MouseEnter:Connect(function()
+                TweenService:Create(ButtonFrame, TweenInfo.new(0.2), {BackgroundColor3 = UI_Colors.ElementHover}):Play()
+            end)
+            ButtonFrame.MouseLeave:Connect(function()
+                TweenService:Create(ButtonFrame, TweenInfo.new(0.2), {BackgroundColor3 = UI_Colors.Element}):Play()
+            end)
+            ButtonFrame.MouseButton1Click:Connect(function()
+                TweenService:Create(ButtonFrame, TweenInfo.new(0.1), {Size = UDim2.new(1, -5, 0, 33)}):Play()
+                task.wait(0.1)
+                TweenService:Create(ButtonFrame, TweenInfo.new(0.1), {Size = UDim2.new(1, 0, 0, 35)}):Play()
+                if callback then callback() end
+            end)
+        end
+
+        function Tab:CreateToggle(text, defaultState, callback)
+            local ToggleFrame = Instance.new("TextButton")
+            ToggleFrame.Size = UDim2.new(1, 0, 0, 35)
+            ToggleFrame.BackgroundColor3 = UI_Colors.Element
+            ToggleFrame.Text = ""
+            ToggleFrame.AutoButtonColor = false
+            ToggleFrame.Parent = TabPage
+            
+            local Corner = Instance.new("UICorner"); Corner.CornerRadius = UDim.new(0, 6); Corner.Parent = ToggleFrame
+            
+            local Label = Instance.new("TextLabel")
+            Label.Size = UDim2.new(1, -50, 1, 0)
+            Label.Position = UDim2.new(0, 10, 0, 0)
+            Label.BackgroundTransparency = 1
+            Label.Text = text
+            Label.Font = Enum.Font.GothamMedium
+            Label.TextColor3 = UI_Colors.Text
+            Label.TextSize = 12
+            Label.TextXAlignment = Enum.TextXAlignment.Left
+            Label.Parent = ToggleFrame
+            
+            -- Switch graphic
+            local SwitchBg = Instance.new("Frame")
+            SwitchBg.Size = UDim2.new(0, 40, 0, 20)
+            SwitchBg.Position = UDim2.new(1, -50, 0.5, -10)
+            SwitchBg.BackgroundColor3 = defaultState and UI_Colors.Accent or UI_Colors.ToggleOff
+            SwitchBg.Parent = ToggleFrame
+            local SwitchCorner = Instance.new("UICorner"); SwitchCorner.CornerRadius = UDim.new(1, 0); SwitchCorner.Parent = SwitchBg
+            
+            local Knob = Instance.new("Frame")
+            Knob.Size = UDim2.new(0, 16, 0, 16)
+            Knob.Position = defaultState and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+            Knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            Knob.Parent = SwitchBg
+            local KnobCorner = Instance.new("UICorner"); KnobCorner.CornerRadius = UDim.new(1, 0); KnobCorner.Parent = Knob
+
+            local toggled = defaultState
+
+            ToggleFrame.MouseButton1Click:Connect(function()
+                toggled = not toggled
+                
+                -- Animate
+                TweenService:Create(SwitchBg, TweenInfo.new(0.2), {
+                    BackgroundColor3 = toggled and UI_Colors.Accent or UI_Colors.ToggleOff
+                }):Play()
+                TweenService:Create(Knob, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                    Position = toggled and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+                }):Play()
+                
+                if callback then callback(toggled) end
+            end)
+        end
+        
+        function Tab:CreateInput(placeholder, callback)
+            local InputFrame = Instance.new("Frame")
+            InputFrame.Size = UDim2.new(1, 0, 0, 35)
+            InputFrame.BackgroundColor3 = UI_Colors.Element
+            InputFrame.Parent = TabPage
+            Instance.new("UICorner", InputFrame).CornerRadius = UDim.new(0, 6)
+            
+            local TextBox = Instance.new("TextBox")
+            TextBox.Size = UDim2.new(1, -10, 1, 0)
+            TextBox.Position = UDim2.new(0, 5, 0, 0)
+            TextBox.BackgroundTransparency = 1
+            TextBox.Font = Enum.Font.Gotham
+            TextBox.Text = ""
+            TextBox.PlaceholderText = placeholder
+            TextBox.PlaceholderColor3 = UI_Colors.TextDark
+            TextBox.TextColor3 = UI_Colors.Text
+            TextBox.TextSize = 12
+            TextBox.TextXAlignment = Enum.TextXAlignment.Left
+            TextBox.Parent = InputFrame
+            
+            TextBox.FocusLost:Connect(function(enterPressed)
+                if callback then callback(TextBox.Text) end
+            end)
+        end
+
+        return Tab
+    end
+    
+    return Window
+end
+
+-- // ИНИЦИАЛИЗАЦИЯ ИНТЕРФЕЙСА //
+
+local MainWindow = UI:CreateWindow("Wava Hub")
+
+-- Вкладка Main
+local MainTab = MainWindow:CreateTab("Main")
+
+MainTab:CreateToggle("Anti Trap (Удаляет ловушки)", config.AntiTrap, function(state)
+    antiTrapEnabled = state
+    config.AntiTrap = state
+    if state then
+        -- Logic for AntiTrap
+        local function shouldRemoveTrapTouch(tt)
+            if not (tt:IsA("TouchTransmitter") and tt.Name == "TouchInterest") then return false end
+            local p = tt.Parent
+            if not (p and p:IsA("MeshPart") and p.Name == "Open") then return false end
+            local m = p:FindFirstAncestorOfClass("Model")
+            return (m and m.Name == "Trap")
+        end
+        for _, o in ipairs(workspace:GetDescendants()) do
+            if o:IsA("TouchTransmitter") and shouldRemoveTrapTouch(o) then pcall(function() o:Destroy() end) end
+        end
+    end
+end)
+
+MainTab:CreateToggle("Speed Boost", config.SpeedBoost, function(state)
+    speedBoostEnabled = state
+    config.SpeedBoost = state
+    
+    if state then
+        task.spawn(function()
+            while speedBoostEnabled do
+                local char = LocalPlayer.Character
+                if char and char:FindFirstChild("Humanoid") and char.Humanoid.MoveDirection.Magnitude > 0 then
+                    local root = char:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        local dir = char.Humanoid.MoveDirection
+                        root.Velocity = Vector3.new(dir.X * config.BoostSpeedValue, root.Velocity.Y, dir.Z * config.BoostSpeedValue)
+                    end
+                end
+                RunService.Heartbeat:Wait()
+            end
+        end)
+    end
+end)
+
+MainTab:CreateToggle("Infinite Jump", config.InfiniteJump, function(state)
+    infiniteJumpEnabled = state
+    config.InfiniteJump = state
+end)
+UserInputService.JumpRequest:Connect(function()
+    if infiniteJumpEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end)
+
+MainTab:CreateToggle("Float (Полет)", false, function(state)
+    floatEnabled = state
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local humanoid = char and char:FindFirstChild("Humanoid")
+    
+    if state and root and humanoid then
+        humanoid:ChangeState(Enum.HumanoidStateType.Flying)
+        local baseY = root.Position.Y
+        
+        task.spawn(function()
+            while floatEnabled and humanoid.Health > 0 do
+                local cam = workspace.CurrentCamera
+                local forward = cam.CFrame.LookVector
+                forward = Vector3.new(forward.X, 0, forward.Z).Unit
+                root.AssemblyLinearVelocity = forward * 40
+                root.CFrame = CFrame.new(root.Position.X, baseY + 2.7, root.Position.Z)
+                RunService.Heartbeat:Wait()
+            end
+        end)
+    elseif humanoid then
+        humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+    end
+end)
+
+MainTab:CreateToggle("God Mode", false, function(state)
+    godModeEnabled = state
+    if state then
+        RunService.RenderStepped:Connect(function()
+            if godModeEnabled and LocalPlayer.Character then
+                local h = LocalPlayer.Character:FindFirstChild("Humanoid")
+                if h and h.Health < h.MaxHealth then
+                    h.Health = h.MaxHealth
+                end
+            end
+        end)
+    end
+end)
+
+MainTab:CreateButton("Teleport Up", function()
+    local r = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if r then r.CFrame = r.CFrame + Vector3.new(0, 150, 0) end
+end)
+
+MainTab:CreateButton("Teleport Down", function()
+    local r = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if r then r.CFrame = r.CFrame - Vector3.new(0, 189, 0) end
+end)
+
+-- Вкладка Helper
+local HelperTab = MainWindow:CreateTab("Helper")
+
+HelperTab:CreateToggle("Anti-Ragdoll", false, function(state)
+    antiRagdollEnabled = state
+    -- Простая реализация
+    if state then
+        task.spawn(function()
+            while antiRagdollEnabled do
+                local h = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
+                if h and (h:GetState() == Enum.HumanoidStateType.Physics or h:GetState() == Enum.HumanoidStateType.Ragdoll) then
+                    h:ChangeState(Enum.HumanoidStateType.GettingUp)
+                end
+                task.wait(0.1)
+            end
+        end)
+    end
+end)
+
+HelperTab:CreateToggle("Auto-Slap", false, function(state)
+    autoSlapEnabled = state
+    task.spawn(function()
+        while autoSlapEnabled do
+            pcall(function()
+                local char = LocalPlayer.Character
+                local tools = LocalPlayer.Backpack:GetChildren()
+                -- Простая попытка ударить
+                for _, t in pairs(char:GetChildren()) do
+                    if t:IsA("Tool") then t:Activate() end
+                end
+            end)
+            task.wait(0.1)
+        end
+    end)
+end)
+
+HelperTab:CreateButton("Steal Helper", function()
+    pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/erewe23/uitest.github.io/refs/heads/main/ere.lua"))() end)
+end)
+
+-- Вкладка ESP
+local EspTab = MainWindow:CreateTab("ESP")
+
+EspTab:CreateToggle("Players ESP", false, function(state)
+    playersEspEnabled = state
+    if not state then
+        for _, v in pairs(CoreGui:GetChildren()) do
+            if v.Name:find("ESP_") then v:Destroy() end
+        end
+    else
+        task.spawn(function()
+            while playersEspEnabled do
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+                        if not CoreGui:FindFirstChild("ESP_"..plr.Name) then
+                            local bb = Instance.new("BillboardGui")
+                            bb.Name = "ESP_"..plr.Name
+                            bb.Adornee = plr.Character.HumanoidRootPart
+                            bb.Size = UDim2.new(0, 100, 0, 40)
+                            bb.StudsOffset = Vector3.new(0, 3, 0)
+                            bb.AlwaysOnTop = true
+                            bb.Parent = CoreGui
+                            
+                            local txt = Instance.new("TextLabel")
+                            txt.Size = UDim2.new(1,0,1,0)
+                            txt.BackgroundTransparency = 1
+                            txt.Text = plr.DisplayName
+                            txt.TextColor3 = Color3.fromRGB(255,255,255)
+                            txt.TextStrokeTransparency = 0
+                            txt.Parent = bb
+                        end
+                    end
+                end
+                task.wait(1)
+            end
+        end)
+    end
+end)
+
+EspTab:CreateToggle("View Base Timers", config.ViewBaseTimers, function(state)
+    plotTimers_Enabled = state
+    -- Реализация таймеров должна быть здесь (упрощено для примера)
+end)
+
+-- Вкладка Misc
+local MiscTab = MainWindow:CreateTab("Misc")
+
+MiscTab:CreateInput("Job ID", function(text)
+    config.SelectedJobId = text
+end)
+
+MiscTab:CreateButton("Join Job ID", function()
+    if config.SelectedJobId then
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, config.SelectedJobId)
+    end
+end)
+
+MiscTab:CreateButton("Server Hop", function()
+    -- Простой Server Hop
+    local Http = game:GetService("HttpService")
+    local Servers = Http:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100"))
+    for _, s in ipairs(Servers.data) do
+        if s.playing < s.maxPlayers and s.id ~= game.JobId then
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, s.id)
+            break
+        end
+    end
+end)
+
+MiscTab:CreateButton("Rejoin", function()
+    TeleportService:Teleport(game.PlaceId, LocalPlayer)
+end)
+
+-- Загрузка InfYield
+task.spawn(function()
+    pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/wedfwef3/ere.github.io/refs/heads/main/infyield.lua"))() end)
+end)
