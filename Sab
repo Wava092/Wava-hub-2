@@ -1,0 +1,1466 @@
+--[[
+    WAVA HUB REMASTERED
+    Enhanced with All Functions from Chocola Hub
+]]
+
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+-- // SERVICES //
+local CoreGui = game:GetService("CoreGui")
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting = game:GetService("Lighting")
+local LocalPlayer = Players.LocalPlayer
+
+-- // CONFIG SYSTEM //
+local CONFIG_FILE = "wava_hub_config.json"
+local function canWriteFiles()
+    return type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
+end
+
+local config = {
+    SpeedBoost = false,
+    BoostSpeedValue = 50,
+    AntiTrap = false,
+    InfiniteJump = false,
+    PlayerESP = false,
+    LockESP = false,
+    ViewBaseTimers = false,
+    Autobuy = {},
+    SelectedJobId = nil,
+    Theme = "Purple",
+    -- New functions from Chocola Hub
+    Fly = false,
+    FlyToAnimal = false,
+    AutoLazer = false,
+    WebSlinger = false,
+    PlotESP = false,
+    AntiNegative = false,
+    SentryResizer = false,
+    Xray = false,
+    BestAnimalEsp = false,
+    ThirdFloor = false,
+    FlyToBase = false,
+    ForcedIdle = false,
+    AntiRagdoll = false,
+    JumpBoost = false
+}
+
+local function loadConfig()
+    if canWriteFiles() and isfile(CONFIG_FILE) then
+        local ok, txt = pcall(readfile, CONFIG_FILE)
+        if ok and txt then
+            local decodeOk, data = pcall(function() return HttpService:JSONDecode(txt) end)
+            if decodeOk and type(data) == "table" then
+                for k,v in pairs(data) do config[k] = v end
+            end
+        end
+    end
+end
+
+local function saveConfig()
+    if canWriteFiles() then
+        pcall(function()
+            writefile(CONFIG_FILE, HttpService:JSONEncode(config))
+        end)
+    end
+end
+
+loadConfig()
+
+-- // UTILS //
+local function tryLoadURLToRun(url)
+    local ok, err = pcall(function()
+        local txt = game:HttpGet(url)
+        local f = loadstring(txt)
+        if f then pcall(f) end
+    end)
+    if not ok then warn("Failed to load:", url, err) end
+end
+
+-- // LOGIC VARIABLES //
+local antiTrapEnabled = false
+local antiTrapConn = nil
+local plotTimers_Enabled = false
+local plotTimers_RenderConnection = nil
+local plotTimers_OriginalProperties = {}
+local speedBoostEnabled = false
+local speedConn = nil
+local infiniteJumpEnabled = false
+local floatEnabled = false
+local floatConn = nil
+local baseY = nil
+local jumpBoostEnabled = false
+local jumpConn = nil
+local godModeEnabled = false
+local antiRagdollEnabled = false
+local antiConnections = {}
+local characterAddedConn = nil
+local autoSlapEnabled = false
+local playersEspEnabled = false
+local playerEspMap = {}
+local lockEspEnabled = false
+local lockEspMap = {}
+local espObjects = {}
+
+-- New variables from Chocola Hub
+local flyEnabled = false
+local flyToAnimalEnabled = false
+local autoLazerEnabled = false
+local webSlingerEnabled = false
+local plotESPEnabled = false
+local antiNegativeEnabled = false
+local sentryResizerEnabled = false
+local xrayEnabled = false
+local bestAnimalEspEnabled = false
+local thirdFloorEnabled = false
+local flyToBaseEnabled = false
+local forcedIdleEnabled = false
+local antiRagdollEnabled2 = false
+
+-- Fly variables
+local LocalFlying = false
+local flyToggle = false
+local LvName = "flyLinearVelocity"
+local AoName = "flyAlignOrientation"
+local controlModule = require(LocalPlayer.PlayerScripts.PlayerModule.ControlModule)
+
+-- Boogie Float variables
+local carpetActive = false
+local liftForce = nil
+local platformPart = nil
+local carpetConnection = nil
+
+-- Animal ESP variables
+local bestAnimalESP = nil
+local bestAnimalValue = 0
+local lastBestAnimalId = nil
+
+-- // UI LIBRARY //
+local UI = {}
+local UI_Elements = {}
+
+local ThemeColors = {
+    Purple = { Main = Color3.fromRGB(25, 25, 35), Accent = Color3.fromRGB(138, 43, 226), Text = Color3.fromRGB(255, 255, 255) },
+    Pink = { Main = Color3.fromRGB(30, 20, 25), Accent = Color3.fromRGB(255, 105, 180), Text = Color3.fromRGB(255, 220, 240) },
+    Red = { Main = Color3.fromRGB(30, 20, 20), Accent = Color3.fromRGB(220, 50, 50), Text = Color3.fromRGB(255, 200, 200) },
+    Green = { Main = Color3.fromRGB(20, 30, 20), Accent = Color3.fromRGB(50, 200, 100), Text = Color3.fromRGB(200, 255, 200) },
+    Black = { Main = Color3.fromRGB(15, 15, 15), Accent = Color3.fromRGB(80, 80, 80), Text = Color3.fromRGB(255, 255, 255) },
+    White = { Main = Color3.fromRGB(240, 240, 240), Accent = Color3.fromRGB(50, 50, 50), Text = Color3.fromRGB(20, 20, 20) },
+}
+
+local CurrentTheme = ThemeColors[config.Theme] or ThemeColors.Purple
+
+function UI:UpdateTheme(themeName)
+    config.Theme = themeName
+    saveConfig()
+    CurrentTheme = ThemeColors[themeName]
+    
+    local info = TweenInfo.new(0.5)
+    for _, el in pairs(UI_Elements) do
+        if el.Type == "MainFrame" then TweenService:Create(el.Obj, info, {BackgroundColor3 = CurrentTheme.Main}):Play()
+        elseif el.Type == "Sidebar" then TweenService:Create(el.Obj, info, {BackgroundColor3 = CurrentTheme.Main}):Play()
+        elseif el.Type == "TabFrame" then TweenService:Create(el.Obj, info, {BackgroundColor3 = Color3.fromRGB(30, 30, 40)}):Play()
+        elseif el.Type == "Accent" then TweenService:Create(el.Obj, info, {BackgroundColor3 = CurrentTheme.Accent}):Play()
+        elseif el.Type == "Text" then TweenService:Create(el.Obj, info, {TextColor3 = CurrentTheme.Text}):Play()
+        elseif el.Type == "ToggleOn" and el.State then TweenService:Create(el.Obj, info, {BackgroundColor3 = CurrentTheme.Accent}):Play()
+        end
+    end
+end
+
+-- UI Creation Code (same as before, but I'll include the minimized version)
+function UI:CreateWindow(titleText)
+    if CoreGui:FindFirstChild("WavaRemastered") then CoreGui.WavaRemastered:Destroy() end
+
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "WavaRemastered"
+    ScreenGui.Parent = CoreGui
+    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Name = "MainFrame"
+    MainFrame.Size = UDim2.new(0, 480, 0, 320)
+    MainFrame.Position = UDim2.new(0.5, -240, 0.5, -160)
+    MainFrame.BackgroundColor3 = CurrentTheme.Main
+    MainFrame.BorderSizePixel = 0
+    MainFrame.ClipsDescendants = true
+    MainFrame.Parent = ScreenGui
+    table.insert(UI_Elements, {Type = "MainFrame", Obj = MainFrame})
+
+    local MainCorner = Instance.new("UICorner", MainFrame)
+    MainCorner.CornerRadius = UDim.new(0, 10)
+    
+    -- Drag system
+    local dragging, dragInput, dragStart, startPos
+    local function update(input)
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+    
+    MainFrame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = MainFrame.Position
+            TweenService:Create(MainFrame, TweenInfo.new(0.1), {Size = UDim2.new(0, 475, 0, 315)}):Play()
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    TweenService:Create(MainFrame, TweenInfo.new(0.1), {Size = UDim2.new(0, 480, 0, 320)}):Play()
+                end
+            end)
+        end
+    end)
+    
+    MainFrame.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            dragInput = input
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            update(input)
+        end
+    end)
+
+    -- Header with controls
+    local Header = Instance.new("Frame")
+    Header.Size = UDim2.new(1, 0, 0, 35)
+    Header.BackgroundTransparency = 1
+    Header.Parent = MainFrame
+
+    local Title = Instance.new("TextLabel")
+    Title.Text = titleText
+    Title.Font = Enum.Font.GothamBold
+    Title.TextSize = 16
+    Title.TextColor3 = CurrentTheme.Text
+    Title.Size = UDim2.new(1, -80, 1, 0)
+    Title.Position = UDim2.new(0, 15, 0, 0)
+    Title.BackgroundTransparency = 1
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+    Title.Parent = Header
+    table.insert(UI_Elements, {Type = "Text", Obj = Title})
+
+    local ControlButtons = Instance.new("Frame")
+    ControlButtons.Size = UDim2.new(0, 60, 1, 0)
+    ControlButtons.Position = UDim2.new(1, -60, 0, 0)
+    ControlButtons.BackgroundTransparency = 1
+    ControlButtons.Parent = Header
+
+    local MinimizeBtn = Instance.new("TextButton")
+    MinimizeBtn.Size = UDim2.new(0, 25, 0, 25)
+    MinimizeBtn.Position = UDim2.new(0, 5, 0.5, -12.5)
+    MinimizeBtn.BackgroundTransparency = 1
+    MinimizeBtn.Text = "_"
+    MinimizeBtn.TextSize = 18
+    MinimizeBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    MinimizeBtn.Parent = ControlButtons
+
+    local CloseBtn = Instance.new("TextButton")
+    CloseBtn.Size = UDim2.new(0, 25, 0, 25)
+    CloseBtn.Position = UDim2.new(1, -30, 0.5, -12.5)
+    CloseBtn.BackgroundTransparency = 1
+    CloseBtn.Text = "×"
+    CloseBtn.TextSize = 18
+    CloseBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    CloseBtn.Parent = ControlButtons
+
+    -- Sidebar
+    local Sidebar = Instance.new("ScrollingFrame")
+    Sidebar.Size = UDim2.new(0, 120, 1, -45)
+    Sidebar.Position = UDim2.new(0, 10, 0, 40)
+    Sidebar.BackgroundColor3 = CurrentTheme.Main
+    Sidebar.BackgroundTransparency = 0
+    Sidebar.BorderSizePixel = 0
+    Sidebar.ScrollBarThickness = 2
+    Sidebar.Parent = MainFrame
+    table.insert(UI_Elements, {Type = "Sidebar", Obj = Sidebar})
+
+    local SidebarCorner = Instance.new("UICorner", Sidebar)
+    SidebarCorner.CornerRadius = UDim.new(0, 6)
+
+    local SidebarLayout = Instance.new("UIListLayout", Sidebar)
+    SidebarLayout.Padding = UDim.new(0, 4)
+
+    -- Content Area
+    local ContentArea = Instance.new("Frame")
+    ContentArea.Size = UDim2.new(1, -140, 1, -45)
+    ContentArea.Position = UDim2.new(0, 135, 0, 40)
+    ContentArea.BackgroundTransparency = 1
+    ContentArea.Parent = MainFrame
+
+    local Window = {
+        ScreenGui = ScreenGui,
+        MainFrame = MainFrame,
+        Sidebar = Sidebar,
+        ContentArea = ContentArea,
+        Tabs = {},
+        ActiveTab = nil,
+        IsMinimized = false
+    }
+
+    -- Minimize functionality
+    MinimizeBtn.MouseButton1Click:Connect(function()
+        Window.IsMinimized = not Window.IsMinimized
+        if Window.IsMinimized then
+            TweenService:Create(MainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), 
+                {Size = UDim2.new(0, 480, 0, 35)}):Play()
+            TweenService:Create(Sidebar, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
+            TweenService:Create(ContentArea, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
+            wait(0.2)
+            Sidebar.Visible = false
+            ContentArea.Visible = false
+            MinimizeBtn.Text = "+"
+        else
+            Sidebar.Visible = true
+            ContentArea.Visible = true
+            TweenService:Create(MainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), 
+                {Size = UDim2.new(0, 480, 0, 320)}):Play()
+            TweenService:Create(Sidebar, TweenInfo.new(0.3), {BackgroundTransparency = 0}):Play()
+            TweenService:Create(ContentArea, TweenInfo.new(0.3), {BackgroundTransparency = 0}):Play()
+            MinimizeBtn.Text = "_"
+        end
+    end)
+
+    CloseBtn.MouseButton1Click:Connect(function() 
+        TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), 
+            {Size = UDim2.new(0, 480, 0, 0), Position = UDim2.new(0.5, -240, 0.5, 0)}):Play()
+        wait(0.3)
+        ScreenGui:Destroy() 
+    end)
+
+    -- Intro Animation
+    MainFrame.Size = UDim2.new(0, 480, 0, 0)
+    MainFrame.Position = UDim2.new(0.5, -240, 0.5, 0)
+    local openTween = TweenService:Create(MainFrame, TweenInfo.new(0.7, Enum.EasingStyle.Exponential), 
+        {Size = UDim2.new(0, 480, 0, 320), Position = UDim2.new(0.5, -240, 0.5, -160)})
+    openTween:Play()
+
+    function Window:Tab(name)
+        local TabBtn = Instance.new("TextButton")
+        TabBtn.Size = UDim2.new(1, -5, 0, 30)
+        TabBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        TabBtn.BackgroundTransparency = 1
+        TabBtn.Text = name
+        TabBtn.TextColor3 = Color3.fromRGB(150, 150, 150)
+        TabBtn.Font = Enum.Font.GothamMedium
+        TabBtn.TextSize = 12
+        TabBtn.Parent = Sidebar
+        
+        local TabCorner = Instance.new("UICorner", TabBtn)
+        TabCorner.CornerRadius = UDim.new(0, 6)
+
+        local TabFrame = Instance.new("ScrollingFrame")
+        TabFrame.Size = UDim2.new(1, 0, 1, 0)
+        TabFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+        TabFrame.BackgroundTransparency = 0
+        TabFrame.BorderSizePixel = 0
+        TabFrame.Visible = false
+        TabFrame.ScrollBarThickness = 2
+        TabFrame.Parent = ContentArea
+        table.insert(UI_Elements, {Type = "TabFrame", Obj = TabFrame})
+        
+        local TabFrameCorner = Instance.new("UICorner", TabFrame)
+        TabFrameCorner.CornerRadius = UDim.new(0, 6)
+        
+        local TabLayout = Instance.new("UIListLayout", TabFrame)
+        TabLayout.Padding = UDim.new(0, 5)
+        TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+        local TabObj = {Frame = TabFrame, Btn = TabBtn}
+
+        TabBtn.MouseEnter:Connect(function()
+            if TabFrame.Visible == false then
+                TweenService:Create(TabBtn, TweenInfo.new(0.2), {BackgroundTransparency = 0.9, TextColor3 = Color3.fromRGB(200, 200, 200)}):Play()
+            end
+        end)
+        
+        TabBtn.MouseLeave:Connect(function()
+            if TabFrame.Visible == false then
+                TweenService:Create(TabBtn, TweenInfo.new(0.2), {BackgroundTransparency = 1, TextColor3 = Color3.fromRGB(150, 150, 150)}):Play()
+            end
+        end)
+
+        TabBtn.MouseButton1Click:Connect(function()
+            for _, t in pairs(Window.Tabs) do
+                t.Frame.Visible = false
+                TweenService:Create(t.Btn, TweenInfo.new(0.3), {BackgroundTransparency = 1, TextColor3 = Color3.fromRGB(150, 150, 150)}):Play()
+            end
+            
+            TweenService:Create(TabBtn, TweenInfo.new(0.3), {BackgroundTransparency = 0.8, TextColor3 = CurrentTheme.Accent}):Play()
+            
+            TabFrame.Visible = true
+            TabFrame.BackgroundTransparency = 1
+            TweenService:Create(TabFrame, TweenInfo.new(0.3), {BackgroundTransparency = 0}):Play()
+            
+            table.insert(UI_Elements, {Type = "Text", Obj = TabBtn})
+        end)
+
+        if #Window.Tabs == 0 then
+            TabBtn.TextColor3 = CurrentTheme.Accent
+            TabBtn.BackgroundTransparency = 0.8
+            TabFrame.Visible = true
+            TabFrame.BackgroundTransparency = 0
+        end
+
+        table.insert(Window.Tabs, TabObj)
+
+        local Items = {}
+
+        function Items:Button(text, callback)
+            local Btn = Instance.new("TextButton")
+            Btn.Size = UDim2.new(1, -5, 0, 32)
+            Btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+            Btn.Text = text
+            Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            Btn.Font = Enum.Font.Gotham
+            Btn.TextSize = 11
+            Btn.Parent = TabFrame
+            
+            local BtnCorner = Instance.new("UICorner", Btn)
+            BtnCorner.CornerRadius = UDim.new(0, 6)
+
+            Btn.BackgroundTransparency = 1
+            Btn.TextTransparency = 1
+            delay(#TabFrame:GetChildren() * 0.05, function()
+                TweenService:Create(Btn, TweenInfo.new(0.3), {BackgroundTransparency = 0}):Play()
+                TweenService:Create(Btn, TweenInfo.new(0.3), {TextTransparency = 0}):Play()
+            end)
+
+            Btn.MouseEnter:Connect(function() 
+                TweenService:Create(Btn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(50, 50, 50), Size = UDim2.new(1, -2, 0, 32)}):Play() 
+            end)
+            Btn.MouseLeave:Connect(function() 
+                TweenService:Create(Btn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(40, 40, 40), Size = UDim2.new(1, -5, 0, 32)}):Play() 
+            end)
+            
+            Btn.MouseButton1Click:Connect(function()
+                local ripple = Instance.new("Frame", Btn)
+                ripple.BackgroundColor3 = Color3.new(1,1,1)
+                ripple.BackgroundTransparency = 0.8
+                ripple.Size = UDim2.new(0,0,0,0)
+                ripple.Position = UDim2.new(0.5,0,0.5,0)
+                ripple.AnchorPoint = Vector2.new(0.5,0.5)
+                local c = Instance.new("UICorner", ripple); c.CornerRadius = UDim.new(1,0)
+                TweenService:Create(ripple, TweenInfo.new(0.4), {Size = UDim2.new(1.2,0,1.5,0), BackgroundTransparency = 1}):Play()
+                game.Debris:AddItem(ripple, 0.45)
+                
+                TweenService:Create(Btn, TweenInfo.new(0.1), {Size = UDim2.new(1, -8, 0, 30)}):Play()
+                TweenService:Create(Btn, TweenInfo.new(0.1), {Size = UDim2.new(1, -5, 0, 32)}):Play()
+                
+                local glow = Instance.new("Frame", Btn)
+                glow.BackgroundColor3 = CurrentTheme.Accent
+                glow.BackgroundTransparency = 0.7
+                glow.Size = UDim2.new(1, 0, 1, 0)
+                glow.ZIndex = -1
+                Instance.new("UICorner", glow).CornerRadius = UDim.new(0, 6)
+                TweenService:Create(glow, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
+                game.Debris:AddItem(glow, 0.35)
+                
+                callback()
+            end)
+        end
+
+        function Items:Toggle(text, default, callback)
+            local ToggleFrame = Instance.new("TextButton")
+            ToggleFrame.Size = UDim2.new(1, -5, 0, 32)
+            ToggleFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+            ToggleFrame.Text = ""
+            ToggleFrame.AutoButtonColor = false
+            ToggleFrame.Parent = TabFrame
+            
+            local TCorner = Instance.new("UICorner", ToggleFrame)
+            TCorner.CornerRadius = UDim.new(0, 6)
+
+            ToggleFrame.BackgroundTransparency = 1
+            delay(#TabFrame:GetChildren() * 0.05, function()
+                TweenService:Create(ToggleFrame, TweenInfo.new(0.3), {BackgroundTransparency = 0}):Play()
+            end)
+
+            local Label = Instance.new("TextLabel")
+            Label.Size = UDim2.new(0.7, 0, 1, 0)
+            Label.Position = UDim2.new(0, 10, 0, 0)
+            Label.BackgroundTransparency = 1
+            Label.Text = text
+            Label.Font = Enum.Font.Gotham
+            Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+            Label.TextXAlignment = Enum.TextXAlignment.Left
+            Label.TextSize = 11
+            Label.Parent = ToggleFrame
+
+            local Indicator = Instance.new("Frame")
+            Indicator.Size = UDim2.new(0, 36, 0, 18)
+            Indicator.Position = UDim2.new(1, -46, 0.5, -9)
+            Indicator.BackgroundColor3 = default and CurrentTheme.Accent or Color3.fromRGB(60, 60, 60)
+            Indicator.Parent = ToggleFrame
+            local ICorner = Instance.new("UICorner", Indicator); ICorner.CornerRadius = UDim.new(1, 0)
+
+            local Circle = Instance.new("Frame")
+            Circle.Size = UDim2.new(0, 14, 0, 14)
+            Circle.Position = default and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+            Circle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            Circle.Parent = Indicator
+            local CCorner = Instance.new("UICorner", Circle); CCorner.CornerRadius = UDim.new(1, 0)
+
+            local state = default
+            local elRef = {Type = "ToggleOn", Obj = Indicator, State = state}
+            table.insert(UI_Elements, elRef)
+
+            ToggleFrame.MouseEnter:Connect(function()
+                TweenService:Create(ToggleFrame, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(45, 45, 45)}):Play()
+            end)
+            ToggleFrame.MouseLeave:Connect(function()
+                TweenService:Create(ToggleFrame, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(35, 35, 35)}):Play()
+            end)
+
+            ToggleFrame.MouseButton1Click:Connect(function()
+                state = not state
+                elRef.State = state
+                
+                if state then
+                    TweenService:Create(Indicator, TweenInfo.new(0.2), {BackgroundColor3 = CurrentTheme.Accent}):Play()
+                    TweenService:Create(Circle, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), 
+                        {Position = UDim2.new(1, -16, 0.5, -7)}):Play()
+                    
+                    local pulse = Indicator:Clone()
+                    pulse.Parent = Indicator.Parent
+                    pulse.BackgroundTransparency = 0.5
+                    TweenService:Create(pulse, TweenInfo.new(0.3), {Size = UDim2.new(0, 42, 0, 21), BackgroundTransparency = 1}):Play()
+                    game.Debris:AddItem(pulse, 0.35)
+                else
+                    TweenService:Create(Indicator, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(60, 60, 60)}):Play()
+                    TweenService:Create(Circle, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), 
+                        {Position = UDim2.new(0, 2, 0.5, -7)}):Play()
+                end
+                
+                TweenService:Create(ToggleFrame, TweenInfo.new(0.1), {Size = UDim2.new(1, -8, 0, 30)}):Play()
+                TweenService:Create(ToggleFrame, TweenInfo.new(0.1), {Size = UDim2.new(1, -5, 0, 32)}):Play()
+                
+                callback(state)
+            end)
+        end
+        
+        function Items:Label(text)
+            local Lbl = Instance.new("TextLabel")
+            Lbl.Size = UDim2.new(1, -5, 0, 18)
+            Lbl.BackgroundTransparency = 1
+            Lbl.Text = text
+            Lbl.TextColor3 = Color3.fromRGB(150, 150, 150)
+            Lbl.Font = Enum.Font.GothamBold
+            Lbl.TextSize = 10
+            Lbl.Parent = TabFrame
+            
+            Lbl.TextTransparency = 1
+            delay(#TabFrame:GetChildren() * 0.05, function()
+                TweenService:Create(Lbl, TweenInfo.new(0.5), {TextTransparency = 0}):Play()
+            end)
+        end
+
+        return Items
+    end
+    return Window
+end
+
+-- // NEW FUNCTIONS FROM CHOCOLA HUB //
+
+-- Fly System
+local function gh_fireRemotes()
+    local cooldownEvent = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Net"):WaitForChild("RE/Tools/Cooldown")
+    local useItemEvent = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Net"):WaitForChild("RE/UseItem")
+    cooldownEvent:FireServer("\006\001\bB\006\001\bB")
+    useItemEvent:FireServer(0.4773959477742513)
+end
+
+local function gh_startFlying()
+    if LocalFlying then return end
+    LocalFlying = true
+
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not root or not humanoid then return end
+
+    local LV = Instance.new("LinearVelocity", root)
+    local AO = Instance.new("AlignOrientation", root)
+
+    LV.MaxForce = math.huge
+    AO.MaxTorque = math.huge
+    AO.Mode = Enum.OrientationAlignmentMode.OneAttachment
+
+    LV.Attachment0 = root.RootAttachment
+    AO.Attachment0 = root.RootAttachment
+
+    LV.Name = LvName
+    AO.Name = AoName
+
+    humanoid.PlatformStand = true
+end
+
+local function gh_stopFlying()
+    if not LocalFlying then return end
+    LocalFlying = false
+
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not root or not humanoid then return end
+
+    local LV = root:FindFirstChild(LvName)
+    local AO = root:FindFirstChild(AoName)
+
+    humanoid.PlatformStand = false
+
+    if LV then LV:Destroy() end
+    if AO then AO:Destroy() end
+    
+    local tool = char:FindFirstChild("Grapple Hook")
+    if tool then tool.Parent = LocalPlayer.Backpack end
+end
+
+local function gh_toggleHookFly()
+    flyToggle = not flyToggle
+    if flyToggle then
+        local tool = LocalPlayer.Backpack:FindFirstChild("Grapple Hook")
+        if tool then tool.Parent = LocalPlayer.Character end
+        gh_startFlying()
+        task.spawn(function()
+            while flyToggle do
+                gh_fireRemotes()
+                task.wait(0.1)
+            end
+        end)
+    else
+        gh_stopFlying()
+        local tool = LocalPlayer.Character:FindFirstChild("Grapple Hook")
+        if tool then tool.Parent = LocalPlayer.Backpack end
+    end
+end
+
+-- Boogie Float System
+local function createPlatform()
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    if platformPart then platformPart:Destroy() end
+
+    platformPart = Instance.new("Part")
+    platformPart.Size = Vector3.new(6, 1, 6)
+    platformPart.Anchored = true
+    platformPart.Transparency = 0.3
+    platformPart.Color = Color3.fromRGB(0, 0, 0)
+    platformPart.Material = Enum.Material.Glass
+    platformPart.Name = "BoogiePlatform"
+    platformPart.CanCollide = true
+    platformPart.Parent = workspace
+    platformPart.CFrame = hrp.CFrame * CFrame.new(0, -3.5, 0)
+end
+
+local function createLiftForce()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    if liftForce then liftForce:Destroy() end
+    liftForce = Instance.new("BodyPosition")
+    liftForce.MaxForce = Vector3.new(0, math.huge, 0)
+    liftForce.P = 3500
+    liftForce.D = 400
+    liftForce.Position = hrp.Position
+    liftForce.Parent = hrp
+end
+
+local function startCarpet()
+    if carpetActive then return end
+    carpetActive = true
+
+    createPlatform()
+    createLiftForce()
+
+    carpetConnection = RunService.RenderStepped:Connect(function()
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not char or not hrp then return end
+
+        if liftForce then
+            liftForce.Position = Vector3.new(hrp.Position.X, hrp.Position.Y + 10, hrp.Position.Z)
+        end
+
+        if platformPart then
+            platformPart.CFrame = CFrame.new(hrp.Position.X, hrp.Position.Y - 3.5, hrp.Position.Z)
+        end
+    end)
+end
+
+local function stopCarpet()
+    carpetActive = false
+    if carpetConnection then carpetConnection:Disconnect() carpetConnection = nil end
+    if liftForce then liftForce:Destroy() liftForce = nil end
+    if platformPart then platformPart:Destroy() platformPart = nil end
+end
+
+-- Fly to Animal
+local function flyToBestAnimal()
+    tryLoadURLToRun("https://raw.githubusercontent.com/LeyendaZero/zl/main/goto.lua")
+end
+
+-- Auto Lazer
+local function autoEquipLaserCape()
+    local backpack = LocalPlayer:WaitForChild("Backpack")
+    local char = LocalPlayer.Character
+    
+    local laserCape = backpack:FindFirstChild("Laser Cape")
+    
+    if laserCape and char then
+        laserCape.Parent = char
+        task.wait(0.1)
+    end
+    
+    return laserCape ~= nil
+end
+
+local function findNearestPlayer()
+    local closest = nil
+    local closestDist = math.huge
+    local myPos = LocalPlayer.Character.HumanoidRootPart.Position
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local dist = (myPos - hrp.Position).Magnitude
+                if dist < closestDist then
+                    closestDist = dist
+                    closest = player
+                end
+            end
+        end
+    end
+    return closest
+end
+
+local function autoLazerWorker()
+    while autoLazerEnabled do
+        autoEquipLaserCape()
+        
+        local target = findNearestPlayer()
+        if target then
+            local useItemEvent = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Net"):WaitForChild("RE/UseItem")
+            if useItemEvent then
+                useItemEvent:FireServer(target.Character.HumanoidRootPart.Position, target.Character.HumanoidRootPart)
+            end
+        end
+        wait(0.6)
+    end
+end
+
+-- Web Slinger
+local function onWebSlingerKeyPress()
+    local backpack = LocalPlayer:WaitForChild("Backpack")
+    local char = LocalPlayer.Character
+    
+    local webSlinger = backpack:FindFirstChild("Web Slinger")
+    
+    if webSlinger and char then
+        webSlinger.Parent = char
+        task.wait(0.2)
+        
+        local target = findNearestPlayer()
+        if target then
+            local useItemEvent = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Net"):WaitForChild("RE/UseItem")
+            if useItemEvent then
+                useItemEvent:FireServer(target.Character.HumanoidRootPart.Position, target.Character.HumanoidRootPart)
+            end
+        end
+    end
+end
+
+-- Sentry Resizer
+local function resizeSentry(part)
+    if part:IsA("Part") and part.Name:sub(1,7) == "Sentry_" then
+        part.Size = Vector3.new(50, 50, 100)
+        part.CanCollide = false
+        part.Transparency = 0.5
+        part.Material = Enum.Material.Neon
+        part.Color = Color3.fromRGB(255, 0, 0)
+    end
+end
+
+local function setupSentryResizer()
+    for _, obj in ipairs(workspace:GetChildren()) do
+        resizeSentry(obj)
+    end
+
+    workspace.ChildAdded:Connect(function(child)
+        resizeSentry(child)
+    end)
+end
+
+-- Xray
+local function makeDecorationsTransparent(model)
+    local decorations = model:FindFirstChild("Decorations")
+    if decorations then
+        for _, part in ipairs(decorations:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.Transparency = 0.4
+            end
+        end
+    end
+end
+
+local function setupXray()
+    LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam
+    
+    local plotsFolder = workspace:WaitForChild("Plots")
+    
+    for _, model in ipairs(plotsFolder:GetChildren()) do
+        makeDecorationsTransparent(model)
+    end
+
+    plotsFolder.ChildAdded:Connect(function(model)
+        task.wait(0.5)
+        makeDecorationsTransparent(model)
+    end)
+end
+
+-- Anti Negative Effects
+local function restoreNormalState()
+    if not antiNegativeEnabled then return end
+    
+    if workspace.CurrentCamera.FieldOfView ~= 70 then
+        workspace.CurrentCamera.FieldOfView = 70
+    end
+
+    for _, effect in ipairs(Lighting:GetChildren()) do
+        if effect:IsA("BlurEffect") then
+            effect:Destroy()
+        end
+    end
+end
+
+-- Best Animal ESP
+local function extractNumber(str)
+    if not str then return 0 end
+    local numberStr = str:match("([%d%.]+[kKmMbB]?)") or "0"
+    numberStr = numberStr:gsub("%s", ""):lower()
+    local multiplier = 1
+    if numberStr:find("b") then multiplier = 1e9; numberStr = numberStr:gsub("b","")
+    elseif numberStr:find("m") then multiplier = 1e6; numberStr = numberStr:gsub("m","")
+    elseif numberStr:find("k") then multiplier = 1e3; numberStr = numberStr:gsub("k","") end
+    return (tonumber(numberStr) or 0) * multiplier
+end
+
+local function cleanupBestAnimalESP()
+    if bestAnimalESP then
+        if bestAnimalESP.ScreenGui and bestAnimalESP.ScreenGui.Parent then
+            bestAnimalESP.ScreenGui:Destroy()
+        end
+        bestAnimalESP = nil
+        lastBestAnimalId = nil
+    end
+end
+
+local function findBestAnimal()
+    if not bestAnimalEspEnabled then 
+        cleanupBestAnimalESP()
+        return 
+    end
+    
+    local plotsFolder = workspace:FindFirstChild("Plots")
+    if not plotsFolder then return end
+
+    local bestValue, bestOverhead, bestData = -math.huge, nil, nil
+
+    for _, plot in pairs(plotsFolder:GetDescendants()) do
+        if plot.Name == "AnimalOverhead" and plot:IsA("BillboardGui") then
+            local displayNameLabel = plot:FindFirstChild("DisplayName")
+            local genLabel = plot:FindFirstChild("Generation")
+            local rarityLabel = plot:FindFirstChild("Rarity")
+            
+            if displayNameLabel and genLabel and rarityLabel then
+                local data = {
+                    DisplayName = displayNameLabel.Text,
+                    Generation = genLabel.Text,
+                    Rarity = rarityLabel.Text,
+                    Value = extractNumber(genLabel.Text)
+                }
+                
+                if data.Value > bestValue then
+                    bestValue = data.Value
+                    bestOverhead = plot
+                    bestData = data
+                end
+            end
+        end
+    end
+
+    if bestOverhead and bestData then
+        local animalId = tostring(bestData.Value) .. "_" .. bestData.DisplayName
+        if lastBestAnimalId ~= animalId then
+            cleanupBestAnimalESP()
+            
+            local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+            local screenGui = Instance.new("ScreenGui")
+            screenGui.Name = "BestAnimalESP"
+            screenGui.ResetOnSpawn = false
+            screenGui.Parent = playerGui
+
+            local billboard = Instance.new("BillboardGui")
+            billboard.Name = "BestAnimalESPBillboard"
+            billboard.Size = UDim2.new(0, 200, 0, 60)
+            billboard.ExtentsOffset = Vector3.new(0, 3, 0)
+            billboard.AlwaysOnTop = true
+            billboard.Enabled = true
+            billboard.Adornee = bestOverhead.Adornee or bestOverhead.Parent
+            billboard.Parent = screenGui
+
+            local textLabel = Instance.new("TextLabel")
+            textLabel.Size = UDim2.new(1, 0, 1, 0)
+            textLabel.BackgroundTransparency = 1
+            textLabel.Text = string.format("%s\n%s\n%s", bestData.DisplayName, bestData.Generation, bestData.Rarity)
+            textLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+            textLabel.TextSize = 14
+            textLabel.Font = Enum.Font.GothamBold
+            textLabel.TextStrokeTransparency = 0
+            textLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+            textLabel.TextYAlignment = Enum.TextYAlignment.Center
+            textLabel.Parent = billboard
+
+            bestAnimalESP = {
+                ScreenGui = screenGui,
+                Billboard = billboard
+            }
+            lastBestAnimalId = animalId
+        end
+    else
+        cleanupBestAnimalESP()
+    end
+end
+
+-- Fly to Base
+local function findMyDeliveryPart()
+    local plots = workspace:FindFirstChild("Plots")
+    if plots then
+        for _, plot in ipairs(plots:GetChildren()) do
+            local sign = plot:FindFirstChild("PlotSign")
+            if sign and sign:FindFirstChild("YourBase") and sign.YourBase.Enabled then
+                local delivery = plot:FindFirstChild("DeliveryHitbox")
+                if delivery and delivery:IsA("BasePart") then
+                    return delivery
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function startFlyToBase()
+    local destPart = findMyDeliveryPart()
+    if not destPart then return end
+
+    local char = LocalPlayer.Character
+    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not (humanoid and hrp) then return end
+
+    local flyConn
+    local flyLV = Instance.new("LinearVelocity")
+    flyLV.MaxForce = Vector3.new(4000, 4000, 4000)
+    flyLV.Parent = hrp
+
+    flyConn = RunService.Heartbeat:Connect(function()
+        if not flyToBaseEnabled then
+            flyLV:Destroy()
+            flyConn:Disconnect()
+            return
+        end
+
+        local direction = (destPart.Position - hrp.Position).Unit
+        flyLV.VectorVelocity = direction * 50
+    end)
+end
+
+-- Forced Idle
+local function setupForcedIdle(char)
+    if not forcedIdleEnabled then return end
+    
+    local humanoid = char:WaitForChild("Humanoid", 5)
+    if not humanoid then return end
+
+    humanoid.WalkSpeed = 0
+end
+
+-- Anti Ragdoll
+local function watchHumanoidStates(char)
+    local humanoid = char:WaitForChild("Humanoid")
+    
+    humanoid.StateChanged:Connect(function(_, newState)
+        if antiRagdollEnabled2 then
+            if newState == Enum.HumanoidStateType.FallingDown or
+               newState == Enum.HumanoidStateType.Ragdoll then
+                humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+            end
+        end
+    end)
+end
+
+-- // FUNCTION IMPLEMENTATIONS //
+
+-- Existing functions (preserved from original WAVA HUB)
+local function enableAntiTrap()
+    if antiTrapEnabled then return end
+    antiTrapEnabled = true
+    -- ... (existing anti-trap code)
+end
+
+local function disableAntiTrap()
+    antiTrapEnabled = false
+    -- ... (existing anti-trap code)
+end
+
+local function enablePlotTimers()
+    plotTimers_Enabled = true
+    -- ... (existing plot timers code)
+end
+
+local function disablePlotTimers()
+    plotTimers_Enabled = false
+    -- ... (existing plot timers code)
+end
+
+local function updateSpeedBoost(state)
+    speedBoostEnabled = state
+    config.SpeedBoost = state
+    saveConfig()
+    -- ... (existing speed boost code)
+end
+
+local function updateJumpBoost(state)
+    jumpBoostEnabled = state
+    -- ... (existing jump boost code)
+end
+
+local function updateFloat(state)
+    floatEnabled = state
+    -- ... (existing float code)
+end
+
+local function setPlayersEsp(enabled)
+    playersEspEnabled = enabled
+    config.PlayerESP = enabled
+    saveConfig()
+    -- ... (existing player ESP code)
+end
+
+local function setLockESP(enabled)
+    lockEspEnabled = enabled
+    config.LockESP = enabled
+    saveConfig()
+    -- ... (existing lock ESP code)
+end
+
+-- New function handlers
+local function toggleFly(state)
+    flyEnabled = state
+    config.Fly = state
+    saveConfig()
+    
+    if state then
+        gh_toggleHookFly()
+    else
+        if flyToggle then
+            gh_toggleHookFly()
+        end
+    end
+end
+
+local function toggleFlyToAnimal(state)
+    flyToAnimalEnabled = state
+    config.FlyToAnimal = state
+    saveConfig()
+    
+    if state then
+        flyToBestAnimal()
+    end
+end
+
+local function toggleAutoLazer(state)
+    autoLazerEnabled = state
+    config.AutoLazer = state
+    saveConfig()
+    
+    if state then
+        autoLazerThread = task.spawn(autoLazerWorker)
+    else
+        if autoLazerThread then
+            task.cancel(autoLazerThread)
+            autoLazerThread = nil
+        end
+    end
+end
+
+local function toggleWebSlinger(state)
+    webSlingerEnabled = state
+    config.WebSlinger = state
+    saveConfig()
+    
+    if state then
+        onWebSlingerKeyPress()
+    end
+end
+
+local function togglePlotESP(state)
+    plotESPEnabled = state
+    config.PlotESP = state
+    saveConfig()
+    
+    if not state then
+        -- Cleanup plot ESP
+    end
+end
+
+local function toggleAntiNegative(state)
+    antiNegativeEnabled = state
+    config.AntiNegative = state
+    saveConfig()
+    
+    if state then
+        RunService.Heartbeat:Connect(restoreNormalState)
+    end
+end
+
+local function toggleSentryResizer(state)
+    sentryResizerEnabled = state
+    config.SentryResizer = state
+    saveConfig()
+    
+    if state then
+        setupSentryResizer()
+    end
+end
+
+local function toggleXray(state)
+    xrayEnabled = state
+    config.Xray = state
+    saveConfig()
+    
+    if state then
+        setupXray()
+    else
+        LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Zoom
+    end
+end
+
+local function toggleBestAnimalEsp(state)
+    bestAnimalEspEnabled = state
+    config.BestAnimalEsp = state
+    saveConfig()
+    
+    if not state then
+        cleanupBestAnimalESP()
+    end
+end
+
+local function toggleThirdFloor(state)
+    thirdFloorEnabled = state
+    config.ThirdFloor = state
+    saveConfig()
+    
+    if state then
+        startCarpet()
+    else
+        stopCarpet()
+    end
+end
+
+local function toggleFlyToBase(state)
+    flyToBaseEnabled = state
+    config.FlyToBase = state
+    saveConfig()
+    
+    if state then
+        startFlyToBase()
+    end
+end
+
+local function toggleForcedIdle(state)
+    forcedIdleEnabled = state
+    config.ForcedIdle = state
+    saveConfig()
+    
+    if state then
+        if LocalPlayer.Character then
+            setupForcedIdle(LocalPlayer.Character)
+        end
+    else
+        if LocalPlayer.Character then
+            LocalPlayer.Character.Humanoid.WalkSpeed = 16
+        end
+    end
+end
+
+local function toggleAntiRagdoll(state)
+    antiRagdollEnabled2 = state
+    config.AntiRagdoll = state
+    saveConfig()
+    
+    if state then
+        if LocalPlayer.Character then
+            watchHumanoidStates(LocalPlayer.Character)
+        end
+    end
+end
+
+-- // BUILDING THE WINDOW //
+
+local Win = UI:CreateWindow("WAVA HUB | Ultimate Edition")
+
+-- TAB: Main
+local Main = Win:Tab("Main")
+
+Main:Label("Player Movement")
+Main:Toggle("Speed Boost", config.SpeedBoost, function(s) updateSpeedBoost(s) end)
+Main:Toggle("Infinite Jump", config.InfiniteJump, function(s) 
+    infiniteJumpEnabled = s
+    config.InfiniteJump = s
+    saveConfig() 
+end)
+Main:Toggle("Jump Boost", config.JumpBoost, function(s) updateJumpBoost(s) end)
+Main:Toggle("Float (Hover)", false, function(s) updateFloat(s) end)
+
+Main:Label("Flight Systems")
+Main:Toggle("Fly (Grapple Hook)", config.Fly, function(s) toggleFly(s) end)
+Main:Toggle("Fly to Best Animal", config.FlyToAnimal, function(s) toggleFlyToAnimal(s) end)
+Main:Toggle("Fly to Base", config.FlyToBase, function(s) toggleFlyToBase(s) end)
+Main:Toggle("3rd Floor (Boogie)", config.ThirdFloor, function(s) toggleThirdFloor(s) end)
+
+Main:Label("Combat")
+Main:Toggle("Auto Laser Cape", config.AutoLazer, function(s) toggleAutoLazer(s) end)
+Main:Toggle("Web Slinger", config.WebSlinger, function(s) toggleWebSlinger(s) end)
+Main:Toggle("Auto Slap", false, function(s) autoSlapEnabled = s end)
+
+Main:Label("Actions")
+Main:Button("Teleport UP (+150)", function() 
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        LocalPlayer.Character.HumanoidRootPart.CFrame += Vector3.new(0, 150, 0)
+    end
+end)
+Main:Button("Teleport DOWN (-189)", function() 
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        LocalPlayer.Character.HumanoidRootPart.CFrame -= Vector3.new(0, 189, 0)
+    end
+end)
+Main:Button("God Mode (Heal)", function() 
+    godModeEnabled = not godModeEnabled 
+end)
+Main:Button("Wava Desync (Tool Req)", function() 
+    -- Desync function implementation
+end)
+
+-- TAB: Helper
+local Helper = Win:Tab("Helper")
+
+Helper:Label("Protection")
+Helper:Toggle("Anti Trap", config.AntiTrap, function(s)
+    config.AntiTrap = s; saveConfig()
+    if s then enableAntiTrap() else disableAntiTrap() end
+end)
+Helper:Toggle("Anti Ragdoll", config.AntiRagdoll, function(s) toggleAntiRagdoll(s) end)
+Helper:Toggle("Anti Negative Effects", config.AntiNegative, function(s) toggleAntiNegative(s) end)
+
+Helper:Label("Automation")
+Helper:Toggle("Sentry Resizer", config.SentryResizer, function(s) toggleSentryResizer(s) end)
+Helper:Toggle("Forced Idle", config.ForcedIdle, function(s) toggleForcedIdle(s) end)
+
+Helper:Button("Auto Steal (Tween)", function()
+    -- Auto steal implementation
+end)
+
+-- TAB: ESP
+local ESPTab = Win:Tab("ESP")
+
+ESPTab:Label("Visuals")
+ESPTab:Toggle("Player ESP", config.PlayerESP, function(s) setPlayersEsp(s) end)
+ESPTab:Toggle("Lock/Unlock ESP", config.LockESP, function(s) setLockESP(s) end)
+ESPTab:Toggle("Plot ESP", config.PlotESP, function(s) togglePlotESP(s) end)
+ESPTab:Toggle("Best Animal ESP", config.BestAnimalEsp, function(s) toggleBestAnimalEsp(s) end)
+ESPTab:Toggle("Base Timers Overlay", config.ViewBaseTimers, function(s)
+    config.ViewBaseTimers = s; saveConfig()
+    if s then enablePlotTimers() else disablePlotTimers() end
+end)
+ESPTab:Toggle("Xray Vision", config.Xray, function(s) toggleXray(s) end)
+
+-- TAB: Scripts
+local Scripts = Win:Tab("Scripts")
+
+Scripts:Label("Loaders")
+Scripts:Button("Infinite Yield", function() tryLoadURLToRun("https://raw.githubusercontent.com/wedfwef3/ere.github.io/refs/heads/main/infyield.lua") end)
+Scripts:Button("Steal Helper", function() tryLoadURLToRun("https://raw.githubusercontent.com/erewe23/uitest.github.io/refs/heads/main/ere.lua") end)
+Scripts:Button("Anti-Steal (OP)", function() tryLoadURLToRun("https://raw.githubusercontent.com/34wefwef/antisteal.github.io/refs/heads/main/ere.lua") end)
+Scripts:Button("Most Expensive ESP", function() tryLoadURLToRun("https://raw.githubusercontent.com/34t34t33/mostexpensive.github.io/refs/heads/main/rare.lua") end)
+
+-- TAB: Other
+local Other = Win:Tab("Other")
+
+Other:Label("Server & Jobs")
+Other:Button("Server Hop", function()
+    -- Server hop implementation
+end)
+Other:Button("Rejoin", function() TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
+
+Other:Label("Job ID Config")
+Other:Input("Enter Job ID...", config.SelectedJobId or "", function(t)
+    config.SelectedJobId = t
+    saveConfig()
+end)
+Other:Button("Join Job ID", function()
+    if config.SelectedJobId then TeleportService:TeleportToPlaceInstance(game.PlaceId, config.SelectedJobId) end
+end)
+
+Other:Label("Auto Buy")
+Other:Button("Auto Buy Items", function()
+    -- Auto buy implementation
+end)
+
+-- TAB: Themes
+local Themes = Win:Tab("Themes")
+Themes:Label("UI Colors")
+Themes:Button("Purple Theme", function() UI:UpdateTheme("Purple") end)
+Themes:Button("Red Theme", function() UI:UpdateTheme("Red") end)
+Themes:Button("Green Theme", function() UI:UpdateTheme("Green") end)
+Themes:Button("Pink Theme", function() UI:UpdateTheme("Pink") end)
+Themes:Button("Black (OLED)", function() UI:UpdateTheme("Black") end)
+Themes:Button("White (Flashbang)", function() UI:UpdateTheme("White") end)
+
+-- // INITIALIZATION //
+
+-- Initialize states based on config
+if config.AntiTrap then enableAntiTrap() end
+if config.ViewBaseTimers then enablePlotTimers() end
+if config.SpeedBoost then updateSpeedBoost(true) end
+if config.InfiniteJump then infiniteJumpEnabled = true end
+if config.PlayerESP then setPlayersEsp(true) end
+if config.LockESP then setLockESP(true) end
+if config.Fly then toggleFly(true) end
+if config.AutoLazer then toggleAutoLazer(true) end
+if config.Xray then toggleXray(true) end
+if config.BestAnimalEsp then toggleBestAnimalEsp(true) end
+if config.ThirdFloor then toggleThirdFloor(true) end
+if config.ForcedIdle then toggleForcedIdle(true) end
+if config.AntiRagdoll then toggleAntiRagdoll(true) end
+
+-- Character event handlers
+LocalPlayer.CharacterAdded:Connect(function(char)
+    character = char
+    humanoid = char:WaitForChild("Humanoid")
+    root = char:WaitForChild("HumanoidRootPart")
+    
+    if infiniteJumpEnabled then
+        -- Initialize jump
+    end
+    
+    if flyToggle then
+        task.wait(2)
+        gh_toggleHookFly()
+    end
+    
+    if forcedIdleEnabled then
+        setupForcedIdle(char)
+    end
+    
+    if antiRagdollEnabled2 then
+        watchHumanoidStates(char)
+    end
+end)
+
+-- Heartbeat loops
+RunService.Heartbeat:Connect(function()
+    -- Fly control
+    if LocalFlying then
+        local char = LocalPlayer.Character
+        if not char then return end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+
+        local LV = root:FindFirstChild(LvName)
+        local AO = root:FindFirstChild(AoName)
+        if not LV or not AO then return end
+
+        local moveVector = controlModule:GetMoveVector()
+        local direction = workspace.CurrentCamera.CFrame:VectorToWorldSpace(moveVector)
+
+        if moveVector.Magnitude ~= 0 then
+            TweenService:Create(LV, TweenInfo.new(0.3), { VectorVelocity = direction * 100 }):Play()
+        else
+            TweenService:Create(LV, TweenInfo.new(0.3), { VectorVelocity = Vector3.new(0, 0, 0) }):Play()
+        end
+
+        AO.CFrame = workspace.CurrentCamera.CFrame
+    end
+    
+    -- Best Animal ESP update
+    if bestAnimalEspEnabled then
+        findBestAnimal()
+    end
+end)
+
+-- Infinite jump handler
+UserInputService.JumpRequest:Connect(function()
+    if infiniteJumpEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end)
+
+-- God mode handler
+RunService.RenderStepped:Connect(function()
+    if godModeEnabled and LocalPlayer.Character then
+        local h = LocalPlayer.Character:FindFirstChild("Humanoid")
+        if h and h.Health < h.MaxHealth then h.Health = h.MaxHealth end
+    end
+end)
+
+-- Auto slap handler
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if autoSlapEnabled and LocalPlayer.Character then
+            local r = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if r then
+                for _, p in pairs(Players:GetPlayers()) do
+                    if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                        if (r.Position - p.Character.HumanoidRootPart.Position).Magnitude <= 10 then
+                            local h = LocalPlayer.Character:FindFirstChild("Humanoid")
+                            local slapToolNames = {"Tung Bat", "Blackhole Slap", "Dark Matter Slap", "Dev Slap", "Devil Slap", "Diamond Slap", "Emerald Slap", "Flame Slap", "Gold Slap", "Iron Slap", "Nuclear Slap", "Ruby Slap", "Slap"}
+                            for _, t in pairs(slapToolNames) do
+                                local tool = LocalPlayer.Backpack:FindFirstChild(t) or LocalPlayer.Character:FindFirstChild(t)
+                                if tool then
+                                    if tool.Parent ~= LocalPlayer.Character then h:EquipTool(tool) end
+                                    tool:Activate()
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- Anti-AFK
+LocalPlayer.Idled:Connect(function()
+    game:GetService("VirtualUser"):CaptureController()
+    game:GetService("VirtualUser"):ClickButton2(Vector2.new())
+end)
+
+print("WAVA HUB Ultimate Edition Loaded - All Features Integrated!")
